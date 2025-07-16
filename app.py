@@ -1,67 +1,61 @@
 import os
 from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
-
 import spacy
-import openai
+from huggingface_hub import InferenceClient
 
-# ✅ Set the API key first
-openai.api_key = os.getenv("OPENAI_API_KEY")
-if not openai.api_key:
-    raise ValueError("OPENAI_API_KEY is not set or loaded")
+# Load .env and get Hugging Face API key
+load_dotenv()
+hf_key = os.getenv("HF_API_KEY")
+if not hf_key:
+    raise ValueError("HF_API_KEY is not set in .env")
 
-# Optional: Confirm it's set (for debugging)
-print("API key loaded:", openai.api_key[:8] + "..." if openai.api_key else "Not found")
+# Set up the Hugging Face client
+client = InferenceClient(token=hf_key)
 
 # Load spaCy model
 nlp = spacy.load("en_core_web_sm")
 
-# Get user input
+# Get input text
 text = input("Enter a sentence to analyze: ")
 doc = nlp(text)
 
 # Header
-print(
-    "\n{:<12} → {:<10} → {:<10} → {:<30} → {:<50}".format(
-        "Word", "POS", "Lemma", "Meaning", "Example"
-    )
-)
+print("\n{:<12} → {:<10} → {:<10} → {:<30} → {:<50}".format("Word", "POS", "Lemma", "Meaning", "Example"))
 print("-" * 120)
 
-# Analyze
+# Analyze each token
 for token in doc:
     if token.is_alpha:
+        word = token.text
         lemma = token.lemma_
         pos = token.pos_
-        word = token.text
 
         try:
-            prompt = f"Give a short definition and a sentence using the word '{lemma}' as a {pos.lower()}."
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=80,
+            # Ask Hugging Face model
+            prompt = f"Define the word '{lemma}' as a {pos.lower()} and use it in a sentence."
+            response = client.text_generation(
+                prompt,
+                model="google/flan-t5-base",  # ✅ RECOMMENDED MODEL
+                max_new_tokens=100,
+                temperature=0.5,
             )
-            reply = response.choices[0].message.content.strip()
+            reply = response.strip()
 
-            # Try parsing
+
+            # Parse response
             if "Definition:" in reply and "Example:" in reply:
                 meaning = reply.split("Definition:")[1].split("Example:")[0].strip()
                 example = reply.split("Example:")[1].strip()
             else:
                 parts = reply.split(". ")
-                meaning = parts[0].strip()
-                example = ". ".join(parts[1:]).strip()
+                meaning = parts[0].strip() if parts else "N/A"
+                example = ". ".join(parts[1:]).strip() if len(parts) > 1 else "N/A"
 
         except Exception as e:
             meaning = "Error"
             example = str(e)
 
-        print(
-            "{:<12} → {:<10} → {:<10} → {:<30} → {:<50}".format(
-                word, pos, lemma, meaning[:30], example[:50]
-            )
-        )
+        # Print result
+        print("{:<12} → {:<10} → {:<10} → {:<30} → {:<50}".format(
+            word, pos, lemma, meaning[:30], example[:50]
+        ))
